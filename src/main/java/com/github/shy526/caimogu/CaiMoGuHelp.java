@@ -10,17 +10,20 @@ import okhttp3.FormBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.select.Elements;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
-import java.util.HashSet;
-import java.util.Set;
-
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 
 
 @Slf4j
@@ -134,4 +137,242 @@ public class CaiMoGuHelp {
         }
         return 2;
     }
+
+    /**
+     * 获取踩蘑菇当前影响力
+     * @param caiMoGuToken
+     * @return -1 影响力获取错误
+     */
+    public static int getClout(String  caiMoGuToken) {
+        OkHttpClient client = OkHttpClientFactory.getInstance().getClient();
+        Request request = new Request.Builder()
+                .url("https://www.caimogu.cc/user/1672343.html")
+                .addHeader("Host","www.caimogu.cc")
+                .addHeader("Cookie",caiMoGuToken)
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (response.isSuccessful()) {
+                String html = response.body().string();
+                Document doc = Jsoup.parse(html);
+                Elements select = doc.select("div.point-container > .number");
+                if (select.size() != 1) {
+                    return -1;
+                }
+                String str = select.first().html();
+                return Integer.parseInt(str);
+            }
+        } catch (Exception ignored) {
+
+        }
+        return -1;
+    }
+
+    /**
+     * 获取踩蘑菇当前影响力
+     * @param caiMoGuToken
+     * @return -1 影响力获取错误
+     */
+    public static String getNickname(String  caiMoGuToken) {
+        OkHttpClient client = OkHttpClientFactory.getInstance().getClient();
+        Request request = new Request.Builder()
+                .url("https://www.caimogu.cc/user/1672343.html")
+                .addHeader("Host","www.caimogu.cc")
+                .addHeader("Cookie",caiMoGuToken)
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (response.isSuccessful()) {
+                String html = response.body().string();
+                Document doc = Jsoup.parse(html);
+                Elements select = doc.select("div.user-info  .nickname");
+                if (select.size() != 1) {
+                    return "";
+                }
+                return select.first().html();
+            }
+        } catch (Exception ignored) {
+
+        }
+        return "";
+    }
+
+
+    /**
+     * 获取所有回复并归类
+     * @param caiMoGuToken
+     *
+     * @return type=1 帖子Id type=2 游戏Id
+     */
+    public static  Map<Integer, Set<String>> getReplyGroup(String  caiMoGuToken) {
+        OkHttpClient client = OkHttpClientFactory.getInstance().getClient();
+        int page = 1;
+        String urlFormat="https://www.caimogu.cc/user/act/my_list?act=reply&page=%s";
+        Map<Integer, Set<String>> group = new HashMap<>();
+        while (page!=0) {
+         String url= String.format(urlFormat,page);
+            Request request = new Request.Builder()
+                    .url(url)
+                    .addHeader("Host","www.caimogu.cc")
+                    .addHeader("Cookie",caiMoGuToken)
+                    .addHeader("X-Requested-With","XMLHttpRequest")
+                    .build();
+            try (Response response = client.newCall(request).execute()) {
+                if (response.isSuccessful()) {
+                    JSONObject reply = JSON.parseObject(response.body().string());
+                    JSONArray jsonArray = reply.getJSONObject("data").getJSONArray("list");
+                    if (jsonArray.isEmpty()) {
+                        break;
+                    }
+                    for (Object item : jsonArray) {
+                        JSONObject itemJson = (JSONObject) item;
+                        Integer type = itemJson.getInteger("type");
+                        String targetId = itemJson.getString("target_id");
+                        Set<String> set = group.get(type);
+                        if (set==null) {
+                            set=new HashSet<>();
+                            group.put(type, set);
+                        }
+                        set.add(targetId);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+          page++;
+        }
+        return group;
+    }
+
+
+    /*
+     * 获取 可以回复 并且 能获得 影响力的帖子
+     * @param postId
+     */
+    public static   int exeAcPost(List<String> qzIds,Set<String> acPostId,String caiMoGuToken){
+        String urlFormat="https://www.caimogu.cc/circle/act/post_list?id=%s&kwType=post&kw=&type=all&topic=&tags=&page=%10";
+
+        int ac=0;
+        for (String qzId : qzIds) {
+            for (int page=1 ;page<=10;page++){
+                String url= String.format(urlFormat,qzId,page);
+                Request request = new Request.Builder()
+                        .url(url)
+                        .addHeader("Host","www.caimogu.cc")
+                        .addHeader("X-Requested-With","XMLHttpRequest")
+                        .build();
+
+                OkHttpClient client = OkHttpClientFactory.getInstance().getClient();
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                LocalDateTime now = LocalDateTime.now();
+                try (Response response = client.newCall(request).execute()) {
+                    if (response.isSuccessful()) {
+                        JSONObject reply = JSON.parseObject(response.body().string());
+                        JSONArray jsonArray = reply.getJSONObject("data").getJSONArray("list");
+                        for (Object item : jsonArray) {
+                            JSONObject itemJson = (JSONObject) item;
+                            String postId = itemJson.getString("id");
+                            if (acPostId.contains(postId)){
+                                continue;
+                            }
+                            String uId = itemJson.getString("user_id");
+                            String createTimeStr = itemJson.getString("create_time");
+                            LocalDateTime date = LocalDateTime.parse(createTimeStr, formatter);
+                            long between = ChronoUnit.DAYS.between(date, now);
+                            Integer replyNumber = itemJson.getInteger("reply_number");
+                            if (replyNumber<=0 || between>10) {
+                                continue;
+                            }
+                            String comment= getPostComments(postId);
+                            if (acPostComments(postId,uId,comment,caiMoGuToken)){
+                                log.error("评论{}成功",postId);
+                                acPostId.add(postId);
+                                ac++;
+                            }
+                            if (ac>=3){
+                                return ac;
+                            }
+                        }
+                        if (jsonArray.isEmpty()) {
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        return ac;
+
+    }
+
+    private static boolean acPostComments(String postId,String uId,String msg,String caiMoGuToken){
+        OkHttpClient client = OkHttpClientFactory.getInstance().getClient();
+        FormBody formBody = new FormBody.Builder()
+                .add("pid", postId)
+                .add("ppid", "0")
+                .add("cid", "0")
+                .add("uid", uId)
+                .add("msg", msg)
+                .add("force", "0")
+                .build();
+        Request request = new Request.Builder()
+                .url("https://www.caimogu.cc/post/act/comment") // 测试API，可替换为实际接口
+                .post(formBody)
+                .addHeader("Host","www.caimogu.cc")
+                .addHeader("Cookie",caiMoGuToken)
+                .addHeader("X-Requested-With","XMLHttpRequest")
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (response.isSuccessful()) {
+                JSONObject jsonObject = JSON.parseObject(response.body().string());
+                Integer status = jsonObject.getInteger("status");
+                return status == 1;
+            }
+        } catch (Exception ignored) {
+
+        }
+        return false;
+    }
+
+    private static String getPostComments(String postId){
+        String urlFormat="https://www.caimogu.cc/post/comments?id=%s&pid=0&order=default&page=%s";
+        int page=1;
+        List<String> result = new ArrayList<>();
+        while (page!=0) {
+            String url= String.format(urlFormat,postId,page);
+            Request request = new Request.Builder()
+                    .url(url)
+                    .addHeader("Host","www.caimogu.cc")
+                    .addHeader("X-Requested-With","XMLHttpRequest")
+                    .build();
+            OkHttpClient client = OkHttpClientFactory.getInstance().getClient();
+            try (Response response = client.newCall(request).execute()) {
+                if (response.isSuccessful()) {
+                    JSONObject reply = JSON.parseObject(response.body().string());
+                    JSONArray jsonArray = reply.getJSONObject("data").getJSONArray("list");
+                    for (Object item : jsonArray) {
+                        JSONObject itemJson = (JSONObject) item;
+                        Integer praiseNumber = itemJson.getInteger("praise_number");
+                        Integer replyNumber = itemJson.getJSONArray("reply").size();
+                        if (praiseNumber==0 &&replyNumber==0) {
+                            String content = itemJson.getString("content");
+                            result.add(content);
+                        }
+                    }
+                    if (result.size()>10||jsonArray.isEmpty()){
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            page++;
+        }
+        if (result.isEmpty()){
+            result.add("让我看看是怎么个事");
+        }
+        Random random = new Random();
+        int index = random.nextInt(result.size());
+        return "<p>"+Jsoup.parse(result.get(index)).text()+"</p>";
+    }
+
 }

@@ -1,14 +1,12 @@
 package com.github.shy526;
 
-import com.alibaba.fastjson2.util.StringUtils;
 import com.github.shy526.caimogu.CaiMoGuHelp;
 import com.github.shy526.github.GithubHelp;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.Iterator;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Hello world!
@@ -22,7 +20,15 @@ public class App
         log.error("启动踩蘑菇获取影响力任务");
         String githubApiToken = System.getenv("MY_GITHUB_API_TOKEN");
         String ownerRepo = System.getenv("OWNER_REPO");
-        String caiMoGuToken = System.getenv("CAI_MO_GU_TOKEN");
+        String caiMoGuToken ="cmg_token=MTc2NTcxMDI2NYmKpZWC0titgKCuaXzT0Myum9mksM96abPcrrKGdn6dk7CllILNrqiKjZaffNDY27Sb0Gqq2pqj09fKb6JdmsidiX-blt7TZYCfr62XraqRyYmynbCXoG2yttmyh5yGnHmkiNqUlrqoeqDZrYLQsdq0mq5nu7mLo7SmrmiGeYPOfmiPmYK4pp-Afapkjb2pkr94tmS7qXprv6m2aoV1ep2TsKXdgs2uo5R5rmqW4NPZs3XUna65erGxzK6whnVl332gmdmCqLmcgGmVcA; CAIMOGU=6968f341ffc6edc8f1ed663266868c79;";
+        System.getenv("CAI_MO_GU_TOKEN");
+        int clout = CaiMoGuHelp.getClout(caiMoGuToken);
+        String nickname = CaiMoGuHelp.getNickname(caiMoGuToken);
+        log.error("当前用户:{},影响力:{}",nickname,clout);
+        if (clout==-1){
+            log.error("CAI_MO_GU_TOKEN 已经失效 重新获取(浏览器中f12 应用程序 Cookie 中的 cmg_token )");
+            return;
+        }
         if (githubApiToken==null|| githubApiToken.trim().isEmpty()){
             log.error("MY_GITHUB_API_TOKEN 参数没有配置(githubApiToken)");
             return;
@@ -37,8 +43,11 @@ public class App
         }
         log.error("配置设置正常");
 
+
+
         String gameIdsFileName="gameIds.txt";
         String acIdsFileName="acIds.txt";
+        String postIdsFileName="postIds.txt";
         String runFileName="run.txt";
 
 
@@ -61,7 +70,18 @@ public class App
             String idsStr = String.join("\n", ids);
             GithubHelp.createOrUpdateFile(idsStr,gameIdsFileName,ownerRepo,githubApiToken);
         }
+
         Set<String> acIds = CaiMoGuHelp.readResources(acIdsFileName);
+        Map<Integer, Set<String>> replyGroup =new HashMap<>();
+        if(acIds.isEmpty()){
+            //文件不存在时主动查寻回复中所有已经回复过的GameId
+             replyGroup = CaiMoGuHelp.getReplyGroup(caiMoGuToken);
+            Set<String> acIdSource = replyGroup.get(2);
+            acIds=acIdSource==null?acIds:acIdSource;
+            String idsStr = String.join("\n", acIds);
+            GithubHelp.createOrUpdateFile(idsStr,acIdsFileName,ownerRepo,githubApiToken);
+        }
+
         //去掉交集
         if (!acIds.isEmpty()) {
             ids.removeAll(acIds);
@@ -95,9 +115,29 @@ public class App
             }
 
         }
-        log.error("成功评价"+trueFlag);
+        log.error("成功评价游戏数量:{}",trueFlag);
         String acIdsStr = String.join("\n", acIds);
         GithubHelp.createOrUpdateFile(acIdsStr,acIdsFileName,ownerRepo,githubApiToken);
+
+        //这里开始回复帖子
+        Set<String> postIds = CaiMoGuHelp.readResources(postIdsFileName);
+        if(postIds.isEmpty()){
+            //文件不存在时主动查寻回复中所有已经回复过的GameId
+            if (replyGroup.isEmpty()){
+                replyGroup = CaiMoGuHelp.getReplyGroup(caiMoGuToken);
+            }
+            Set<String> postIdS = replyGroup.get(1);
+            postIds=postIdS==null?postIds:postIdS;
+            String idsStr = String.join("\n", postIds);
+            GithubHelp.createOrUpdateFile(idsStr,postIdsFileName,ownerRepo,githubApiToken);
+        }
+
+        List<String> qzIds = Arrays.asList("449", "329", "369", "383", "282", "466");
+        int acPostNum = CaiMoGuHelp.exeAcPost(qzIds, postIds,caiMoGuToken);
+        log.error("成功评论帖子数量:{}",acPostNum);
+        int clout2 = CaiMoGuHelp.getClout(caiMoGuToken);
+        log.error("本次任务共获取影响力:{}",clout2-clout);
+        GithubHelp.createOrUpdateFile(String.join("\n", postIds),postIdsFileName,ownerRepo,githubApiToken);
         GithubHelp.createOrUpdateFile(formatter.format(current),runFileName,ownerRepo,githubApiToken);
     }
 
